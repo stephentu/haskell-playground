@@ -37,6 +37,12 @@ emptyVector = Vector [] 0
 buildVector :: (RealFloat a) => [a] -> Vector a
 buildVector a = Vector a (length a)
 
+reprIdentity :: (RealFloat a) => Int -> [[a]]
+reprIdentity n = map mkRow (take n [0..])
+  where
+    zeroSource = repeat 0
+    mkRow i    = (take i zeroSource) ++ [1] ++ (take (n-i-1) zeroSource)
+
 reprTranspose0 :: (RealFloat a) => [[a]] -> [[a]] -> [[a]]
 reprTranspose0 accum values
   | null $ head values = accum
@@ -72,11 +78,17 @@ reprOneMinus a b = [x - y | (x,y) <- zip a b]
 reprOneDot :: (RealFloat a) => [a] -> [a] -> a
 reprOneDot a b = foldl (\acc (a, b) -> acc + (a*b)) 0 $ zip a b
 
+reprOneNorm :: (RealFloat a) => [a] -> a
+reprOneNorm a = sqrt $ reprOneDot a a
+
+reprScale :: (RealFloat a) => [[a]] -> a -> [[a]]
+reprScale a b = map (\row -> reprOneScale row b) a
+
 reprOneScale :: (RealFloat a) => [a] -> a -> [a]
 reprOneScale a b = map (*b) a
 
 reprOneNormalize :: (RealFloat a) => [a] -> [a]
-reprOneNormalize a = reprOneScale a $ (1 / sqrt (reprOneDot a a))
+reprOneNormalize a = reprOneScale a $ (1 / (reprOneNorm a))
 
 -- naive grade school algorithm
 matrixMult :: (RealFloat a) => Matrix a -> Matrix a -> Matrix a
@@ -95,10 +107,13 @@ dot a b = reprOneDot (vals a) (vals b)
 scale :: (RealFloat a) => Vector a -> a -> Vector a
 scale a b = buildVector $ reprOneScale (vals a) b
 
+reprOneSecondMomentProduct :: (RealFloat a) => [a] -> [[a]]
+reprOneSecondMomentProduct a = map (\v -> reprOneScale a v) a
+
 secondMomentProduct :: (RealFloat a) => Vector a -> Matrix a
 secondMomentProduct a = Matrix repr repr (size a) (size a)
   where
-    repr = map (\v -> reprOneScale (vals a) v) (vals a)
+    repr = reprOneSecondMomentProduct $ vals a
 
 -- proj(u, v) = (u^T v)/(u^T u) u
 reprOneProjOperator :: (RealFloat a) => [a] -> [a] -> [a]
@@ -118,3 +133,18 @@ gramSchmidt m = buildMatrix $ reprTranspose (snd $ mapAccumL fn [] (colMajor m))
           otherwise -> if reprOneIsZero testNewCol then (acc, []) else (testNewCol:acc, reprOneNormalize testNewCol)
             where
               testNewCol = col `reprOneMinus` (reprOneSum $ removeComponents acc col)
+
+-- compute householder matrix H of b and k (k is indexed by 0)
+householder :: (RealFloat a) => Vector a -> Int -> Matrix a
+householder b k = buildMatrix hrepr
+  where
+    n     = size b
+    dlen  = n - k -- k is indexed by 0
+    w     = (take (n-dlen) $ repeat 0) ++ v
+    d     = drop (k+1) $ vals b
+    alpha = -1 * (sgn (head d)) * (reprOneNorm d)
+    sgn s = if s < 0 then -1 else 1
+    v0    = sqrt (0.5 * (1 - ((head d)/alpha)))
+    p     = -1 * alpha * v0
+    v     = v0 : (map (/(2*p)) $ tail d)
+    hrepr = reprIdentity n `reprMinus` (reprScale (reprOneSecondMomentProduct w) 2)
