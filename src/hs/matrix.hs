@@ -26,10 +26,10 @@ buildMatrix [[]] = emptyMatrix
 buildMatrix rows =
     Matrix rows cols nRows nCols
   where
-    cols  = reprTranspose rows
-    nRows = length rows
-    nCols = length $ head rows
-    _     = foldl (\x _ -> assert (x == nCols) nCols) nCols (tail rows)
+    cols       = reprTranspose rows
+    nRows      = length rows
+    nCols      = foldl (\x r -> assert (length r == x) x) firstNCols (tail rows)
+    firstNCols = length $ head rows
 
 emptyVector :: (RealFloat a) => Vector a
 emptyVector = Vector [] 0
@@ -76,20 +76,18 @@ reprOneScale :: (RealFloat a) => [a] -> a -> [a]
 reprOneScale a b = map (*b) a
 
 reprOneNormalize :: (RealFloat a) => [a] -> [a]
-reprOneNormalize a = reprOneScale a $ sqrt (reprOneDot a a)
+reprOneNormalize a = reprOneScale a $ (1 / sqrt (reprOneDot a a))
 
 -- naive grade school algorithm
 matrixMult :: (RealFloat a) => Matrix a -> Matrix a -> Matrix a
 matrixMult a b = buildMatrix $ map mkRow $ rowMajor a
   where
-    mkRow row = map (reprOneDot row) (colMajor b)
-    _ = assert (cols a == rows b) 0
+    mkRow row = map (reprOneDot row) (colMajor (assert (cols a == rows b) b))
 
 linear :: (RealFloat a) => Matrix a -> Vector a -> Vector a
 linear a b = buildVector $ map mkRow $ rowMajor a
   where
-    mkRow row = reprOneDot row $ vals b
-    _ = assert (cols a == size b) 0
+    mkRow row = reprOneDot row $ vals (assert (cols a == size b) b)
 
 dot :: (RealFloat a) => Vector a -> Vector a -> a
 dot a b = reprOneDot (vals a) (vals b)
@@ -108,13 +106,15 @@ reprOneProjOperator u v
   | reprOneIsZero u = take (length u) $ repeat 0
   | otherwise       = reprOneScale u ((reprOneDot u v) / (reprOneDot u u))
 
--- assumes matrix has linearly independent *columns*
--- <=> if size(M) = [n, k] then k <= n and rank(M) = k
 gramSchmidt :: (RealFloat a) => Matrix a -> Matrix a
-gramSchmidt m = buildMatrix $ snd $ mapAccumL fn [] (colMajor m)
+gramSchmidt m = buildMatrix $ reprTranspose (snd $ mapAccumL fn [] (colMajor m))
   where
-    _ = assert ((cols m) <= (rows m))
     removeComponents acc col = map (\x -> reprOneProjOperator x col) acc
     reprOneSum reprOnes = foldl reprOnePlus (head reprOnes) (tail reprOnes)
-    fn acc col = (newCol:acc, reprOneNormalize newCol)
-       where newCol = col `reprOneMinus` (reprOneSum $ removeComponents acc col)
+    fn acc col = (newAcc, newCol)
+      where
+        (newAcc, newCol) = case acc of
+          []        -> if reprOneIsZero col then ([], []) else ([col], reprOneNormalize col)
+          otherwise -> if reprOneIsZero testNewCol then (acc, []) else (testNewCol:acc, reprOneNormalize testNewCol)
+            where
+              testNewCol = col `reprOneMinus` (reprOneSum $ removeComponents acc col)
