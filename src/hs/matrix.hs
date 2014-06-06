@@ -54,8 +54,14 @@ reprTranspose0 accum values
 reprTranspose :: (RealFloat a) => [[a]] -> [[a]]
 reprTranspose values = reverse $ reprTranspose0 [] values
 
-reprEq :: (RealFloat a) => [[a]] -> [[a]] -> Bool
-reprEq a b = reprIsZero $ reprMinus a b
+reprOneEq :: (RealFloat a) => [a] -> [a] -> [Bool]
+reprOneEq a b = map (\x -> floatAlmostEq x 0) $ reprOneMinus a b
+
+binToTupleFn :: (a -> b -> c) -> ((a,b) -> c)
+binToTupleFn fn = \tup -> fn (fst tup) (snd tup)
+
+reprEq :: (RealFloat a) => [[a]] -> [[a]] -> [[Bool]]
+reprEq a b = map (binToTupleFn reprOneEq) $ zip a b
 
 reprOneIsZero :: (RealFloat a) => [a] -> Bool
 reprOneIsZero r = all (\x -> floatAlmostEq x 0) r
@@ -96,6 +102,15 @@ matrixMult a b = buildMatrix $ map mkRow $ rowMajor a
   where
     mkRow row = map (reprOneDot row) (colMajor (assert (cols a == rows b) b))
 
+matrixTranspose :: (RealFloat a) => Matrix a -> Matrix a
+matrixTranspose a = a{colMajor = (rowMajor a), rowMajor = (colMajor a), rows = (cols a), cols = (rows a)}
+
+matrixEq :: (RealFloat a) => Matrix a -> Matrix a -> [[Bool]]
+matrixEq a b = reprEq (colMajor a) (colMajor b)
+
+matrixIdentity :: (RealFloat a) => Int -> Matrix a
+matrixIdentity n = buildMatrix $ reprIdentity n
+
 linear :: (RealFloat a) => Matrix a -> Vector a -> Vector a
 linear a b = buildVector $ map mkRow $ rowMajor a
   where
@@ -125,8 +140,8 @@ gramSchmidt :: (RealFloat a) => Matrix a -> Matrix a
 gramSchmidt m = buildMatrix $ reprTranspose (snd $ mapAccumL fn [] (colMajor m))
   where
     removeComponents acc col = map (\x -> reprOneProjOperator x col) acc
-    reprOneSum reprOnes = foldl reprOnePlus (head reprOnes) (tail reprOnes)
-    fn acc col = (newAcc, newCol)
+    reprOneSum reprOnes      = foldl reprOnePlus (head reprOnes) (tail reprOnes)
+    fn acc col               = (newAcc, newCol)
       where
         (newAcc, newCol) = case acc of
           []        -> if reprOneIsZero col then ([], []) else ([col], reprOneNormalize col)
@@ -140,8 +155,8 @@ householder b k = buildMatrix hrepr
   where
     n     = size b
     dlen  = n - k -- k is indexed by 0
-    w     = (take (n-dlen) $ repeat 0) ++ v
-    d     = drop (k+1) $ vals b
+    w     = (take (n-dlen) $ repeat 0) ++ (assert (length v == length d) v)
+    d     = drop (k) $ vals b
     alpha = -1 * (sgn (head d)) * (reprOneNorm d)
     sgn s = if s < 0 then -1 else 1
     v0    = sqrt (0.5 * (1 - ((head d)/alpha)))
