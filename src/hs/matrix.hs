@@ -182,10 +182,10 @@ bidiagReduction0 u b v k
     (b2, v2) = (fst b2v2, snd b2v2)
     b2v2
       | k < (n-2) = (b1 `matrixMult` h2t,  h2t `matrixMult` v)
-      | otherwise  = (b1, v)
+      | otherwise = (b1, v)
       where
         h2t = matrixTranspose h2
-        h2  = householder (matrixRow b k) (k+1)
+        h2  = householder (matrixRow b1 k) (k+1)
 
 bidiagReduction :: (RealFloat a) => Matrix a -> (Matrix a, Matrix a, Matrix a)
 bidiagReduction a = bidiagReduction0 u b v 0
