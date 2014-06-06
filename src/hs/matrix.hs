@@ -111,6 +111,12 @@ matrixEq a b = reprEq (colMajor a) (colMajor b)
 matrixIdentity :: (RealFloat a) => Int -> Matrix a
 matrixIdentity n = buildMatrix $ reprIdentity n
 
+matrixCol :: (RealFloat a) => Matrix a -> Int -> Vector a
+matrixCol a k = buildVector $ (colMajor a) !! k
+
+matrixRow :: (RealFloat a) => Matrix a -> Int -> Vector a
+matrixRow a k = buildVector $ (rowMajor a) !! k
+
 linear :: (RealFloat a) => Matrix a -> Vector a -> Vector a
 linear a b = buildVector $ map mkRow $ rowMajor a
   where
@@ -163,3 +169,28 @@ householder b k = buildMatrix hrepr
     p     = -1 * alpha * v0
     v     = v0 : (map (/(2*p)) $ tail d)
     hrepr = reprIdentity n `reprMinus` (reprScale (reprOneSecondMomentProduct w) 2)
+
+bidiagReduction0 :: (RealFloat a) => Matrix a -> Matrix a -> Matrix a -> Int -> (Matrix a, Matrix a, Matrix a)
+bidiagReduction0 u b v k
+  | k < n     = bidiagReduction0 u1 b2 v2 (k+1)
+  | otherwise = (u, b, v)
+  where
+    (m, n)   = (rows b, cols b)
+    h1       = householder (matrixCol b k) k
+    b1       = h1 `matrixMult` b
+    u1       = u `matrixMult` h1
+    (b2, v2) = (fst b2v2, snd b2v2)
+    b2v2
+      | k < (n-2) = (b1 `matrixMult` h2t,  h2t `matrixMult` v)
+      | otherwise  = (b1, v)
+      where
+        h2t = matrixTranspose h2
+        h2  = householder (matrixRow b k) (k+1)
+
+bidiagReduction :: (RealFloat a) => Matrix a -> (Matrix a, Matrix a, Matrix a)
+bidiagReduction a = bidiagReduction0 u b v 0
+  where
+    (m, n) = (rows a, cols a)
+    u      = matrixIdentity m
+    b      = a
+    v      = matrixIdentity n
