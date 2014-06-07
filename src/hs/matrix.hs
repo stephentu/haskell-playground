@@ -43,6 +43,13 @@ reprIdentity n = map mkRow (take n [0..])
     zeroSource = repeat 0
     mkRow i    = (take i zeroSource) ++ [1] ++ (take (n-i-1) zeroSource)
 
+reprDiag :: (RealFloat a) => [a] -> [[a]]
+reprDiag d = map mkRow $ zip d (take n [0..])
+  where
+    n            = length d
+    zeroSource   = repeat 0
+    mkRow (e, i) = (take i zeroSource) ++ [e] ++ (take (n-i-1) zeroSource)
+
 reprTranspose0 :: (RealFloat a) => [[a]] -> [[a]] -> [[a]]
 reprTranspose0 accum values
   | null $ head values = accum
@@ -117,6 +124,9 @@ matrixCol a k = buildVector $ (colMajor a) !! k
 matrixRow :: (RealFloat a) => Matrix a -> Int -> Vector a
 matrixRow a k = buildVector $ (rowMajor a) !! k
 
+matrixDiag :: (RealFloat a) => [a] -> Matrix a
+matrixDiag d = buildMatrix $ reprDiag d
+
 linear :: (RealFloat a) => Matrix a -> Vector a -> Vector a
 linear a b = buildVector $ map mkRow $ rowMajor a
   where
@@ -155,6 +165,9 @@ gramSchmidt m = buildMatrix $ reprTranspose (snd $ mapAccumL fn [] (colMajor m))
             where
               testNewCol = col `reprOneMinus` (reprOneSum $ removeComponents acc col)
 
+sgn :: (Ord a, Num a) => a -> a
+sgn s = if s < 0 then -1 else 1
+
 -- compute householder matrix H of b and k (k is indexed by 0)
 householder :: (RealFloat a) => Vector a -> Int -> Matrix a
 householder b k = buildMatrix hrepr
@@ -164,7 +177,6 @@ householder b k = buildMatrix hrepr
     w     = (take (n-dlen) $ repeat 0) ++ (assert (length v == length d) v)
     d     = drop (k) $ vals b
     alpha = -1 * (sgn (head d)) * (reprOneNorm d)
-    sgn s = if s < 0 then -1 else 1
     v0    = sqrt (0.5 * (1 - ((head d)/alpha)))
     p     = -1 * alpha * v0
     v     = v0 : (map (/(2*p)) $ tail d)
@@ -194,3 +206,71 @@ bidiagReduction a = bidiagReduction0 u b v 0
     u      = matrixIdentity m
     b      = a
     v      = matrixIdentity n
+
+listUpdate :: [a] -> Int -> a -> [a]
+listUpdate a i e = before ++ [e] ++ (tail after)
+  where
+    (before, after) = splitAt i a
+
+-- very slow
+matrixElemAt :: (RealFloat a) => Matrix a -> Int -> Int -> a
+matrixElemAt a i j = reprElemAt (rowMajor a) i j
+
+reprElemAt :: (RealFloat a) => [[a]] -> Int -> Int -> a
+reprElemAt a i j = (a !! i) !! j
+
+-- jacobi SVD, very inefficient implementation, for square n x n matrices only
+jacobiSingleStep :: (RealFloat a) => Matrix a -> Matrix a -> a -> Int -> Int -> (Matrix a, Matrix a, a)
+jacobiSingleStep u v converge k j = (unext, vnext, converge1)
+  where
+    n         = assert (rows v == cols v) (assert (rows u == cols u) (rows u))
+    alpha     = dot (matrixCol u k) (matrixCol u k)
+    beta      = dot (matrixCol u j) (matrixCol u j)
+    gamma     = dot (matrixCol u k) (matrixCol u j)
+    xi        = (beta - alpha) / (2*gamma)
+    t         = (sgn xi) / ((abs xi) + sqrt (1 + xi * xi))
+    c         = 1 / (sqrt (1 + t * t))
+    s         = c * t
+    unext     = buildMatrix $ foldl ufn (rowMajor u) (take n [0..])
+    vnext     = buildMatrix $ foldl vfn (rowMajor v) (take n [0..])
+    converge1 = max converge ((abs gamma)/(sqrt (alpha*beta)))
+    ufn u l   = u2repr
+      where
+        t      = reprElemAt u l k
+        ulj    = reprElemAt u l j
+        u1repr = reprUpdate u l k (c*t - s*ulj)
+        u2repr = reprUpdate u1repr l j (s*t + c*ulj)
+    vfn v l = v2repr
+      where
+        t      = reprElemAt v l k
+        vlj    = reprElemAt v l j
+        v1repr = reprUpdate v l k (c*t - s*vlj)
+        v2repr = reprUpdate v1repr l j (s*t + c*vlj)
+
+jacobiIter :: (RealFloat a) => Matrix a -> Matrix a -> Int -> a -> (Matrix a, Matrix a)
+jacobiIter u v left tol
+  | left == 0 || converge <= tol = (newu, newv)
+  | otherwise                    = jacobiIter newu newv (left-1) tol
+  where
+    n = assert (rows v == cols v) (assert (rows u == cols u) (rows u))
+    fn (u, v, converge) (k, j) = jacobiSingleStep u v converge k j
+    (newu, newv, converge) = foldl fn (u, v, 0) [(k, j) | k <- [0..(n-1)], j <- [0..(n-1)], k < j]
+
+jacobiSvd :: (RealFloat a) => Matrix a -> (Matrix a, Matrix a, Matrix a)
+jacobiSvd a = (u2, s1, v1)
+  where
+    n        = rows a
+    u        = a
+    v        = matrixIdentity n
+    maxIters = 40
+    tol      = 1e-5
+    (u1, v1) = jacobiIter u v maxIters tol
+    s1       = matrixDiag $ map reprOneNorm (colMajor u1)
+    u2       = buildMatrix $ reprTranspose $ map reprOneNormalize (colMajor u1)
+
+reprUpdate :: (RealFloat a) => [[a]] -> Int -> Int -> a -> [[a]]
+reprUpdate a i j e = map fn (zip a [0..])
+  where
+    fn (row, rid)
+      | rid == i  = listUpdate row j e
+      | otherwise = row
